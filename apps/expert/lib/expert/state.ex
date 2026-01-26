@@ -282,6 +282,7 @@ defmodule Expert.State do
         references_provider: true,
         text_document_sync: sync_options,
         workspace_symbol_provider: true,
+        selection_range_provider: true,
         workspace: %{
           workspace_folders: %Structures.WorkspaceFoldersServerCapabilities{
             supported: true,

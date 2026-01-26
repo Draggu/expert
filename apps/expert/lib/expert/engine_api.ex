@@ -72,6 +72,10 @@ defmodule Expert.EngineApi do
     call(project, Engine, :complete, [env])
   end
 
+  def selection_range(%Project{} = project, %Env{} = env) do
+    call(project, Engine, :selection_range, [env])
+  end
+
   def complete_struct_fields(%Project{} = project, %Analysis{} = analysis, %Position{} = position) do
     call(project, Engine, :complete_struct_fields, [
       analysis,
