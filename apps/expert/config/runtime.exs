@@ -17,5 +17,6 @@ config :logger, :default_handler,
   config: [
     file: String.to_charlist(log_file_name),
     max_no_bytes: :infinity,
-    max_no_files: 0
+    max_no_files: 0,
+    formatter: Logger.Formatter.new(metadata: [:instance_id])
   ]

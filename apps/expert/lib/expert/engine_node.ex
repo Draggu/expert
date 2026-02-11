@@ -204,7 +204,16 @@ defmodule Expert.EngineNode do
     start_net_kernel(project)
 
     node_name = Project.node_name(project)
-    bootstrap_args = [project, Document.Store.entropy(), all_app_configs(), Node.self()]
+
+    bootstrap_args = [
+      project,
+      Document.Store.entropy(),
+      all_app_configs(),
+      Node.self(),
+      # Copy logger global metadata to engine instances.
+      # Everything spawned from single expert instance will use same `instance_id`
+      :logger.get_primary_config().metadata
+    ]
 
     with {:ok, node_pid} <- EngineSupervisor.start_project_node(project),
          {:ok, glob_paths} <- glob_paths(project),
