@@ -162,6 +162,12 @@ defmodule Forge.Project do
     :"expert-manager-#{sanitized}-#{entropy(project)}@127.0.0.1"
   end
 
+  def log_file_path(%__MODULE__{} = project) do
+    project
+    |> workspace_path("project.log")
+    |> String.to_charlist()
+  end
+
   @doc """
   Returns the full path to the project's expert workspace directory
 

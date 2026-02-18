@@ -59,10 +59,7 @@ defmodule Engine.Bootstrap do
   end
 
   defp start_logger(%Project{} = project) do
-    log_file_name =
-      project
-      |> Project.workspace_path("project.log")
-      |> String.to_charlist()
+    log_file_name = Project.log_file_path(project)
 
     handler_name = :"#{Project.name(project)}_handler"
 
