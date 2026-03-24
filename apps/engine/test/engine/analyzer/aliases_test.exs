@@ -268,6 +268,7 @@ defmodule Engine.Analyzer.AliasesTest do
       assert aliases[:"@for"] == Atom
     end
 
+    @tag :only
     test "skips unquote-based aliases in quoted blocks" do
       aliases =
         ~q<

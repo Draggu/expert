@@ -9,7 +9,7 @@ defmodule Forge.Ast.Analysis.State do
   alias Forge.Document.Position
   alias Forge.Document.Range
 
-  defstruct [:document, scopes: [], visited: %{}]
+  defstruct [:document, scopes: [], visited: %{}, expansions: %{}]
 
   def new(%Document{} = document) do
     state = %__MODULE__{document: document}
@@ -26,6 +26,42 @@ defmodule Forge.Ast.Analysis.State do
 
   def current_module(%__MODULE__{} = state) do
     current_scope(state).module
+  end
+
+  def push_expansion(%__MODULE__{} = state, {_, meta, _} = quoted, expanded) do
+    range = Sourceror.get_range(quoted, include_comments: true)
+
+    if range do
+      Map.update!(state, :expansions, &Map.put(&1, range, expanded))
+    else
+      state
+    end
+  end
+
+  def in_expansion?(%__MODULE__{} = state, range) do
+    # inline range.contains?
+    Enum.any?(state.expansions, fn {expansion_range, _expanded} ->
+      contained_in?(range, expansion_range)
+    end)
+  end
+
+  def contained_in?(inner_range, outer_range) when is_map(inner_range) and is_map(outer_range) do
+    inner_start = extract_pos(inner_range.start)
+    inner_end = extract_pos(inner_range.end)
+    outer_start = extract_pos(outer_range.start)
+    outer_end = extract_pos(outer_range.end)
+
+    pos_gte?(inner_start, outer_start) and pos_gte?(outer_end, inner_end)
+  end
+
+  def contained_in?(_, _), do: false
+
+  defp extract_pos(pos) do
+    {Keyword.get(pos, :line) || 0, Keyword.get(pos, :column) || 0}
+  end
+
+  defp pos_gte?({line1, col1}, {line2, col2}) do
+    line1 > line2 or (line1 == line2 and col1 >= col2)
   end
 
   def push_scope(%__MODULE__{} = state, %Scope{} = scope) do

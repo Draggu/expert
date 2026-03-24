@@ -17,7 +17,15 @@ defmodule Forge.Ast.Analysis do
   alias Forge.Identifier
   alias Sourceror.Zipper
 
-  defstruct [:ast, :document, :parse_error, scopes: [], comments_by_line: %{}, valid?: true]
+  defstruct [
+    :ast,
+    :document,
+    :parse_error,
+    scopes: [],
+    comments_by_line: %{},
+    valid?: true,
+    expansions: %{}
+  ]
 
   @type t :: %__MODULE__{}
   @scope_id :_scope_id
@@ -33,25 +41,27 @@ defmodule Forge.Ast.Analysis do
   end
 
   def new({:ok, ast, comments}, %Document{} = document) do
-    scopes = traverse(ast, document)
+    {scopes, expansions} = traverse(ast, document)
     comments_by_line = Map.new(comments, fn comment -> {comment.line, comment} end)
 
     %__MODULE__{
       ast: ast,
       document: document,
       scopes: scopes,
+      expansions: expansions,
       comments_by_line: comments_by_line
     }
   end
 
   def new({:error, ast, parse_error, comments}, %Document{} = document) do
-    scopes = traverse(ast, document)
+    {scopes, expansions} = traverse(ast, document)
     comments_by_line = Map.new(comments, fn comment -> {comment.line, comment} end)
 
     %__MODULE__{
       ast: ast,
       document: document,
       scopes: scopes,
+      expansions: expansions,
       comments_by_line: comments_by_line,
       parse_error: {:error, parse_error, comments},
       valid?: false
@@ -165,16 +175,19 @@ defmodule Forge.Ast.Analysis do
 
     if length(state.scopes) != 1 do
       raise RuntimeError,
-            "invariant not met, :scopes should only contain the global scope: #{inspect(state)}"
+            "invariant not met, :scopes should only contain the global scope: #{inspect(state.scopes, limit: :infinity)}"
     end
 
-    state
-    # pop the final, global state
-    |> State.pop_scope()
-    |> Map.fetch!(:visited)
-    |> Map.reject(fn {_id, scope} -> Scope.empty?(scope) end)
-    |> correct_ranges(quoted, document)
-    |> Map.values()
+    scopes =
+      state
+      # pop the final, global state
+      |> State.pop_scope()
+      |> Map.fetch!(:visited)
+      |> Map.reject(fn {_id, scope} -> Scope.empty?(scope) end)
+      |> correct_ranges(quoted, document)
+      |> Map.values()
+
+    {scopes, state.expansions}
   end
 
   defp preprocess(quoted) do
@@ -419,7 +432,9 @@ defmodule Forge.Ast.Analysis do
          {:use, _meta, [{:__aliases__, _, module} | opts]} = use,
          state
        ) do
-    State.push_use(state, Use.new(state.document, use, module, opts))
+    # TODO resolve macro
+    state = State.push_use(state, Use.new(state.document, use, module, opts))
+    maybe_try_expand_macro(use, state)
   end
 
   # stab clauses: ->
@@ -437,9 +452,140 @@ defmodule Forge.Ast.Analysis do
     end
   end
 
+  defp alias_options(segments) do
+    case segments do
+      # TODO it wont work if as is not single element
+      [element] when is_atom(element) and element not in [:"@for", :"@protocol"] ->
+        [as: Module.concat(Elixir, element)]
+
+      _ ->
+        []
+    end
+  end
+
+  # any call
+  defp analyze_node(
+         {call, meta, _} = quoted,
+         state
+       )
+       when call not in [:quote, :unquote, :defmacro, :defmacrop] do
+    maybe_try_expand_macro(quoted, state)
+  end
+
   # catch-all
   defp analyze_node(_quoted, state) do
     state
+  end
+
+  defp maybe_try_expand_macro({call, meta, _} = quoted, state) do
+    node_range = Sourceror.get_range(quoted, include_comments: true)
+
+    if node_range == nil or Keyword.get(node_range.start, :line) == nil or
+         State.in_expansion?(state, node_range) do
+      state
+    else
+      try_expand_macro(quoted, node_range, state)
+    end
+  end
+
+  defp try_expand_macro({call, meta, _} = quoted, node_range, state) do
+    line = Keyword.get(node_range.start, :line)
+
+    scope = State.current_scope(state)
+    env = %Macro.Env{module: Module.concat(scope.module)}
+    aliases = Scope.aliases(scope, line)
+    requires = Scope.requires(scope, line)
+    imports = Scope.imports(scope, line)
+
+    env =
+      aliases
+      |> Enum.filter(&(&1.as != [:__MODULE__]))
+      |> Enum.filter(&(&1.as != &1.module))
+      |> Enum.filter(fn alias ->
+        is_list(alias.module) and Enum.all?(alias.module, &is_atom/1)
+      end)
+      |> Enum.reduce(env, fn alias, env ->
+        options = alias_options(alias.as)
+
+        {:ok, env} =
+          Macro.Env.define_alias(
+            env,
+            [],
+            Alias.to_module(alias),
+            options
+          )
+
+        env
+      end)
+
+    env =
+      requires
+      # remove implicit __MODULE__ requires, they are not real requires and they don't have to be defined in env
+      |> Enum.filter(&(&1.as != [:__MODULE__]))
+      # remove requires where as is the same as module, they don't have to be defined in env
+      |> Enum.filter(&(&1.as != &1.module))
+      |> Enum.filter(fn require ->
+        is_list(require.module) and Enum.all?(require.module, &is_atom/1)
+      end)
+
+      # filter out requires with non-atom segments, they can't be defined in env
+      |> Enum.reduce(env, fn require, env ->
+        options =
+          alias_options(require.as)
+
+        {:ok, env} =
+          Macro.Env.define_require(
+            env,
+            [],
+            Require.to_module(require),
+            options
+          )
+
+        env
+      end)
+
+    # env =
+    #   Enum.reduce(imports, env, fn import, env ->
+    #     module = Import.to_module(import)
+
+    #     {:ok, env} =
+    #       Macro.Env.define_import( #TODO it asserts that module is loaded, which might not be the case
+    #         env,
+    #         [],
+    #         module
+    #         # TODO only
+    #       )
+
+    #     env
+    #   end)
+
+    # Spitfire.Env.expand(ast, file)
+    # {Code.ensure_loaded?(MyProject.A), function_exported?(MyProject.A, :__info__, 1)}
+
+    case quoted do
+      {{:., _, [{:__aliases__, _, module_segments}, _function_name]}, _, _args} ->
+        # Code.ensure_loaded?(Module.concat(module_segments))
+        # TODO restore it but keep inn mind that there can be not only atom list but also srbitray ast node
+        nil
+
+      _ ->
+        Code.ensure_loaded?(env.module)
+    end
+
+    # TODO wrap in block if it's not a 3 element tuple, so it can be traversed
+    expanded =
+      try do
+        Macro.expand(quoted, env)
+      rescue
+        # macro may fail due to module being already resolved, so Module.*_attribute/2 will fail
+        _ -> quoted
+      end
+
+    if expanded == quoted do
+      state
+    else
+      State.push_expansion(state, quoted, expanded)
+    end
   end
 
   defp maybe_push_implicit_alias(
