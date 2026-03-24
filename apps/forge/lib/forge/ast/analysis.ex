@@ -165,7 +165,7 @@ defmodule Forge.Ast.Analysis do
 
     if length(state.scopes) != 1 do
       raise RuntimeError,
-            "invariant not met, :scopes should only contain the global scope: #{inspect(state)}"
+            "invariant not met, :scopes should only contain the global scope: #{inspect(state.scopes, limit: :infinity)}"
     end
 
     state
@@ -229,6 +229,10 @@ defmodule Forge.Ast.Analysis do
   # add a unique ID to 3-element tuples
   defp with_scope_id({_, _, _} = quoted) do
     id = Identifier.next_global!()
+    with_scope_id(quoted, id)
+  end
+
+  defp with_scope_id({_, _, _} = quoted, id) do
     Macro.update_meta(quoted, &Keyword.put(&1, @scope_id, id))
   end
 
@@ -419,6 +423,7 @@ defmodule Forge.Ast.Analysis do
          {:use, _meta, [{:__aliases__, _, module} | opts]} = use,
          state
        ) do
+    # TODO resolve macro
     State.push_use(state, Use.new(state.document, use, module, opts))
   end
 
@@ -437,9 +442,129 @@ defmodule Forge.Ast.Analysis do
     end
   end
 
+  defp alias_options(segments) do
+    case segments do
+      # TODO it wont work if as is not single element
+      [element] when is_atom(element) and element not in [:"@for", :"@protocol"] ->
+        [as: Module.concat(Elixir, element)]
+
+      _ ->
+        []
+    end
+  end
+
+  # any call
+  defp analyze_node(
+         {_, meta, _} = quoted,
+         state
+       ) do
+    scope = State.current_scope(state)
+    env = %Macro.Env{module: Module.concat(scope.module)}
+
+    case {Keyword.fetch(meta, :line), Keyword.fetch(meta, @scope_id)} do
+      {{:ok, line}, {:ok, scope_id}} ->
+        aliases = Scope.aliases(scope, line)
+        requires = Scope.requires(scope, line)
+        imports = Scope.imports(scope, line)
+
+        env =
+          aliases
+          |> Enum.filter(&(&1.as != [:__MODULE__]))
+          |> Enum.filter(&(&1.as != &1.module))
+          |> Enum.reduce(env, fn alias, env ->
+            options = alias_options(alias.as)
+
+            {:ok, env} =
+              Macro.Env.define_alias(
+                env,
+                [],
+                Alias.to_module(alias),
+                options
+              )
+
+            env
+          end)
+
+        env =
+          requires
+          |> Enum.filter(&(&1.as != [:__MODULE__]))
+          |> Enum.filter(&(&1.as != &1.module))
+          |> Enum.reduce(env, fn require, env ->
+            options =
+              alias_options(require.as)
+
+            {:ok, env} =
+              Macro.Env.define_require(
+                env,
+                [],
+                Require.to_module(require),
+                options
+              )
+
+            env
+          end)
+
+        # env =
+        #   Enum.reduce(imports, env, fn import, env ->
+        #     module = Import.to_module(import)
+
+        #     {:ok, env} =
+        #       Macro.Env.define_import( #TODO it asserts that module is loaded, which might not be the case
+        #         env,
+        #         [],
+        #         module
+        #         # TODO only
+        #       )
+
+        #     env
+        #   end)
+
+        # Spitfire.Env.expand(ast, file)
+        # {Code.ensure_loaded?(MyProject.A), function_exported?(MyProject.A, :__info__, 1)}
+
+        case quoted do
+          {{:., _, [{:__aliases__, _, module_segments}, _function_name]}, _, _args} ->
+            # Code.ensure_loaded?(Module.concat(module_segments))
+            # TODO restore it but keep inn mind that there can be not only atom list but also srbitray ast node
+            nil
+
+          _ ->
+            Code.ensure_loaded?(env.module)
+        end
+
+        File.write!(
+          "/Users/piotr/projects/my_project/expanded.log",
+          "''#{Macro.to_string(quoted)}'' #{quoted |> Macro.expand_once(env) |> Macro.to_string() |> inspect(pretty: true, limit: :infinity)}'''\n",
+          [
+            :append
+          ]
+        )
+
+        # TODO wrap in block if it's not a 3 element tuple, so it can be traversed
+        expanded = quoted |> Macro.expand_once(env) |> wrap_literal() |> with_scope_id(scope_id)
+
+        if expanded == quoted do
+          state
+        else
+          {expanded, state}
+        end
+
+      _ ->
+        state
+    end
+
+    # State.push_require(state, Require.new(state.document, quoted, module))
+  end
+
   # catch-all
   defp analyze_node(_quoted, state) do
     state
+  end
+
+  defp wrap_literal({_, _, _} = ast), do: ast
+
+  defp wrap_literal(literal) do
+    {:__block__, [], [literal]}
   end
 
   defp maybe_push_implicit_alias(

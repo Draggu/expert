@@ -22,6 +22,7 @@ defmodule Engine.Search.Indexer.Quoted do
   end
 
   def extract_entries(%Analysis{} = analysis, extractors) do
+    # TODO we should be able to stop visiting in depth once we found macro call
     {_, reducer} =
       Macro.prewalk(analysis.ast, Reducer.new(analysis, extractors), fn elem, reducer ->
         {reducer, elem} = Reducer.reduce(reducer, elem)
