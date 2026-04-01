@@ -13,15 +13,24 @@ defmodule Engine.CodeIntelligence.References do
   require Logger
 
   def references(%Analysis{} = analysis, %Position{} = position, include_definitions?) do
-    case Entity.resolve(analysis, position) do
-      {:ok, resolved, _range} ->
-        resolved
-        |> maybe_rewrite_resolution(analysis, position)
-        |> find_references(analysis, position, include_definitions?)
+    r =
+      case Entity.resolve(analysis, position) do
+        {:ok, resolved, _range} ->
+          resolved
+          |> maybe_rewrite_resolution(analysis, position)
+          |> find_references(analysis, position, include_definitions?)
 
-      {:error, _} ->
-        []
-    end
+        {:error, _} ->
+          []
+      end
+
+    File.write!(
+      "/users/piotr/projects/expert/ref.log",
+      inspect(r, limit: :infinity, pretty: true) <> "\n----------------\n",
+      [:append]
+    )
+
+    r
   end
 
   defp find_references({:module, module}, _analysis, _position, include_definitions?) do

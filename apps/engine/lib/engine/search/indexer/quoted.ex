@@ -22,7 +22,15 @@ defmodule Engine.Search.Indexer.Quoted do
       ) do
     expansion_entries =
       Enum.flat_map(expansions, fn {range, ast} ->
-        [_ | entries] = extract_entries(Analysis.new(ast, document), extractors)
+        [_ | entries] = entreis_head = extract_entries(Analysis.new(ast, document), extractors)
+
+        if !is_atom(ast) do
+          File.write!(
+            "/users/piotr/projects/my_project/expansion_ast.log",
+            inspect(entreis_head, limit: :infinity, pretty: true) <> "\n----------------\n",
+            [:append]
+          )
+        end
 
         {:ok, range} = Range.from_sourceror_range(range, document)
 
@@ -32,6 +40,18 @@ defmodule Engine.Search.Indexer.Quoted do
       end)
 
     regular_entries = extract_entries(analysis, extractors)
+
+    File.write!(
+      "/users/piotr/projects/my_project/regular.log",
+      inspect(regular_entries, limit: :infinity, pretty: true) <> "\n----------------\n",
+      [:append]
+    )
+
+    File.write!(
+      "/users/piotr/projects/my_project/expansion.log",
+      inspect(expansion_entries, limit: :infinity, pretty: true) <> "\n----------------\n",
+      [:append]
+    )
 
     {:ok, regular_entries ++ expansion_entries}
   end

@@ -102,6 +102,14 @@ defmodule Engine.Search.Indexer.Source.Reducer do
         {:ok, entry, elem} ->
           reducer = push_entry(reducer, entry)
 
+          with [%{subject: "MyProject.A.xd/0"}] <- entry do
+            File.write!(
+              "/users/piotr/projects/my_project/entry.log",
+              inspect(reducer.entries, limit: :infinity, pretty: true) <> "\n----------------\n",
+              [:append]
+            )
+          end
+
           {reducer, elem}
 
         :ignored ->
