@@ -575,7 +575,8 @@ defmodule Forge.Ast.Analysis do
     # TODO wrap in block if it's not a 3 element tuple, so it can be traversed
     expanded =
       try do
-        Macro.expand(quoted, env)
+       {expanded,_,_,_}= Spitfire.Env.expand_recursive(quoted, state.document.path, env)
+    expanded
       rescue
         # macro may fail due to module being already resolved, so Module.*_attribute/2 will fail
         _ -> quoted
