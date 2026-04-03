@@ -156,7 +156,7 @@ defmodule Expert.Engine.CodeIntelligence.DefinitionTest do
 
       {:ok, referenced_uri, definition_line} = definition(project, subject_module, referenced_uri)
 
-      assert definition_line == ~S[  def «sum»(a, b, c) do]
+      assert definition_line == ~S[  def «sum(a, b, c)» do]
       assert referenced_uri =~ "navigations/lib/multi_arity.ex"
     end
   end
