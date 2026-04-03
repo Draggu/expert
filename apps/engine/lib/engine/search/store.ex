@@ -100,6 +100,10 @@ defmodule Engine.Search.Store do
     GenServer.call(__MODULE__, {:update, path, entries})
   end
 
+  def flush do
+    GenServer.call(__MODULE__, :flush)
+  end
+
   def destroy do
     GenServer.call(__MODULE__, :destroy)
   end
@@ -236,6 +240,12 @@ defmodule Engine.Search.Store do
     {reply, new_ref, new_state} = do_update(state, ref, path, entries)
 
     {:reply, reply, {new_ref, new_state}}
+  end
+
+  def handle_call(:flush, _from, {ref, %State{} = state}) do
+    if is_reference(ref), do: Process.cancel_timer(ref)
+    {:ok, state} = State.flush_buffered_updates(state)
+    {:reply, :ok, {nil, state}}
   end
 
   def handle_call({:parent, entry}, _from, {_, %State{} = state} = orig_state) do

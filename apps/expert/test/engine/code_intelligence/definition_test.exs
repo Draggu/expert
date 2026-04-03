@@ -625,20 +625,24 @@ defmodule Expert.Engine.CodeIntelligence.DefinitionTest do
   end
 
   defp index(project, referenced_uris) when is_list(referenced_uris) do
-    entries = Enum.flat_map(referenced_uris, &do_index/1)
-    EngineApi.call(project, Search.Store, :replace, [entries])
+    Enum.each(referenced_uris, fn uri ->
+      with {:ok, document} <- Document.Store.fetch(uri),
+           {:ok, entries} <-
+             Search.Indexer.Source.index(document.path, Document.to_string(document)) do
+        EngineApi.call(project, Search.Store, :update, [document.path, entries])
+      end
+    end)
+
+    EngineApi.call(project, Search.Store, :flush, [])
   end
 
   defp index(project, referenced_uri) do
-    entries = do_index(referenced_uri)
-    EngineApi.call(project, Search.Store, :replace, [entries])
-  end
-
-  defp do_index(referenced_uri) do
     with {:ok, document} <- Document.Store.fetch(referenced_uri),
          {:ok, entries} <-
            Search.Indexer.Source.index(document.path, Document.to_string(document)) do
-      entries
+      EngineApi.call(project, Search.Store, :update, [document.path, entries])
     end
+
+    EngineApi.call(project, Search.Store, :flush, [])
   end
 end
