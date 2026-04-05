@@ -1,3 +1,17 @@
+defmodule ReferencesTestSupport.B do
+  def foo, do: 1
+end
+
+defmodule ReferencesTestSupport.A do
+  defmacro __using__(ast) do
+    quote do
+      import ReferencesTestSupport.B
+
+      unquote(ast)
+    end
+  end
+end
+
 defmodule Engine.CodeIntelligence.ReferencesTest do
   use ExUnit.Case, async: false
 
@@ -92,6 +106,27 @@ defmodule Engine.CodeIntelligence.ReferencesTest do
       /
       assert [%Location{} = location] = references(project, "Enum.map|(a, b)", code)
       assert decorate(code, location.range) =~ "defp func(x), do: «map(x, & &1 + 1)»"
+    end
+
+    test "are found via imports injected by a use macro", %{project: project} do
+      referenced = ~q/
+        defmodule ReferencesTestSupport.B do
+          def foo|(), do: 1
+        end
+      /
+
+      code = ~q/
+        defmodule MyProject do
+          use ReferencesTestSupport.A
+
+          def test() do
+            foo()
+          end
+        end
+      /
+
+      assert [%Location{} = location] = references(project, referenced, code)
+      assert decorate(code, location.range) =~ "«foo()»"
     end
 
     test "are found in local functions", %{project: project} do
